@@ -1,0 +1,3 @@
+status: obsolete
+Brainstorm dump from the first week (2024-11): wild ideas for the
+pipeline, none adopted. Archived for nostalgia only.

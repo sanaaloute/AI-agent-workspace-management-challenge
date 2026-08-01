@@ -1,0 +1,3 @@
+status: obsolete
+Draft budget v0 — numbers were rejected by finance on 2024-12-01.
+Superseded by budget.csv.

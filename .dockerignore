@@ -1,0 +1,22 @@
+# --- VCS ---
+.git
+
+# --- secrets (never bake into the image) ---
+.env
+
+# --- Python ---
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+
+# --- agent run artifacts ---
+trace.jsonl
+
+# --- dev-only content not needed in the image ---
+tests/
+deploy/
+.vscode
+.playwright-mcp
+.DS_Store
+Thumbs.db

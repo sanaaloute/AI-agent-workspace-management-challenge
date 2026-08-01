@@ -1,0 +1,6 @@
+# Random scratch notes
+Date: 2025-01-09
+
+The filename says obsolete, but this content is still relevant: it lists
+the open questions for the parser shim (encoding, delimiters, nulls).
+Do NOT archive me based on my name alone.

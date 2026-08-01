@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI File Agent</title>
+<style>
+  :root {
+    --bg: #05060b;
+    --panel: rgba(255, 255, 255, 0.035);
+    --panel-strong: rgba(13, 17, 28, 0.82);
+    --border: rgba(255, 255, 255, 0.08);
+    --border-bright: rgba(255, 255, 255, 0.14);
+    --text: #e8edf5;
+    --muted: #8892a6;
+    --faint: #5b6478;
+    --accent: #22d3ee;
+    --accent2: #8b5cf6;
+    --ok: #34d399;
+    --err: #f87171;
+    --warn: #fbbf24;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    --radius: 14px;
+    --tool-list: #a78bfa;
+    --tool-read: #22d3ee;
+    --tool-search: #34d399;
+    --tool-write: #fbbf24;
+    --tool-move: #f472b6;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+  }
+  /* aurora backdrop */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(60% 50% at 15% 0%, rgba(139, 92, 246, 0.14), transparent 60%),
+      radial-gradient(50% 45% at 85% 10%, rgba(34, 211, 238, 0.10), transparent 60%),
+      radial-gradient(70% 60% at 50% 110%, rgba(34, 211, 238, 0.06), transparent 65%);
+  }
+  #app {
+    position: relative; z-index: 1;
+    height: 100vh;
+    display: grid;
+    grid-template-areas:
+      "header header header"
+      "left   center right"
+      "left   composer right";
+    grid-template-rows: 54px minmax(0, 1fr) auto;
+    grid-template-columns: var(--left-w, 258px) minmax(0, 1fr) var(--right-w, 336px);
+  }
+  /* sidebar drag-resize handles */
+  .drag-handle {
+    position: absolute; top: 54px; bottom: 0; width: 9px;
+    cursor: col-resize; z-index: 20;
+  }
+  .drag-handle::after {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px;
+    background: transparent; transition: background 0.15s;
+  }
+  .drag-handle:hover::after, .drag-handle.active::after {
+    background: linear-gradient(180deg, var(--accent), var(--accent2));
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
+  }
+  #drag-left { left: calc(var(--left-w, 258px) - 4px); }
+  #drag-right { right: calc(var(--right-w, 336px) - 4px); }
+
+  /* slim scrollbars */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 8px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+
+  .glass {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  /* ---------- header ---------- */
+  header {
+    grid-area: header;
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(8, 10, 17, 0.6);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; user-select: none; }
+  .brand-mark {
+    width: 20px; height: 20px; border-radius: 6px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 0 14px rgba(34, 211, 238, 0.45);
+    transform: rotate(45deg) scale(0.8);
+  }
+  .brand-name { font-size: 14px; font-weight: 650; letter-spacing: 0.4px; }
+  .brand-name span { color: var(--muted); font-weight: 450; }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .stats { display: flex; align-items: center; gap: 14px; margin-right: 6px; }
+  .stat { font-size: 11.5px; color: var(--muted); letter-spacing: 0.4px; text-transform: uppercase; }
+  .stat b { color: var(--text); font-family: var(--mono); font-weight: 600; margin-left: 4px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 11px; font-weight: 650; letter-spacing: 0.8px; text-transform: uppercase;
+    padding: 4px 11px; border-radius: 999px;
+    border: 1px solid var(--border-bright); color: var(--muted);
+  }
+  .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .pill.running { color: var(--accent); border-color: rgba(34, 211, 238, 0.4); }
+  .pill.running::before { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
+  .pill.done { color: var(--ok); border-color: rgba(52, 211, 153, 0.4); }
+  .pill.done::before { background: var(--ok); }
+  .pill.error { color: var(--err); border-color: rgba(248, 113, 113, 0.4); }
+  .pill.error::before { background: var(--err); }
+  @keyframes pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,211,238,.5);} 50% { opacity: .5; box-shadow: 0 0 0 5px rgba(34,211,238,0);} }
+
+  textarea {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 9px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  textarea:focus {
+    border-color: rgba(34, 211, 238, 0.55);
+    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12);
+  }
+  input::placeholder, textarea::placeholder { color: var(--faint); }
+
+  .btn {
+    border: 1px solid var(--border-bright);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+    border-radius: 9px;
+    padding: 7px 13px;
+    font-size: 12.5px; font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, transform .05s;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn:hover { background: rgba(255, 255, 255, 0.09); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn.primary {
+    border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #04121a;
+    box-shadow: 0 2px 16px rgba(34, 211, 238, 0.25);
+  }
+  .btn.primary:hover { filter: brightness(1.12); }
+
+  /* ---------- side panels ---------- */
+  aside { min-height: 0; display: flex; flex-direction: column; }
+  #explorer { grid-area: left; border-right: 1px solid var(--border); }
+  #mission { grid-area: right; border-left: 1px solid var(--border); }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px 10px;
+    font-size: 11px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .panel-body { flex: 1; overflow-y: auto; padding: 0 8px 12px; min-height: 0; }
+  .icon-btn {
+    border: none; background: transparent; color: var(--muted); cursor: pointer;
+    padding: 4px; border-radius: 6px; display: inline-flex;
+    transition: color .15s, background .15s;
+  }
+  .icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.07); }
+
+  /* ---------- file tree ---------- */
+  #tree { font-size: 13px; }
+  #tree ul { list-style: none; margin: 0; padding-left: 15px; }
+  #tree > ul { padding-left: 4px; }
+  .tree-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3.5px 6px; border-radius: 7px;
+    cursor: pointer; color: var(--muted);
+    transition: background .12s, color .12s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tree-row:hover { background: rgba(255,255,255,0.055); color: var(--text); }
+  .tree-row svg { flex: 0 0 auto; }
+  .tree-chevron { transition: transform .18s ease; color: var(--faint); }
+  .tree-item.open > .tree-row .tree-chevron { transform: rotate(90deg); }
+  .tree-children { display: none; }
+  .tree-item.open > .tree-children { display: block; }
+  .tree-row .fname { overflow: hidden; text-overflow: ellipsis; }
+  .tree-row .fsize { margin-left: auto; font-size: 10.5px; color: var(--faint); font-family: var(--mono); }
+  .tree-empty { color: var(--faint); font-size: 12.5px; padding: 8px 10px; }
+  /* hover row actions (upload / delete) */
+  .tree-row .row-actions { display: none; margin-left: auto; gap: 1px; flex: 0 0 auto; }
+  .tree-row .fsize + .row-actions { margin-left: 0; }
+  .tree-row:hover .row-actions { display: inline-flex; }
+  .row-actions .icon-btn { padding: 2px; color: var(--faint); }
+  .row-actions .icon-btn:hover { color: var(--text); }
+  .row-actions .icon-btn.danger:hover { color: var(--err); background: rgba(248, 113, 113, 0.1); }
+
+  /* ---------- center stage ---------- */
+  #stage {
+    grid-area: center;
+    min-height: 0; overflow-y: auto;
+    display: flex; flex-direction: column;
+    padding: 26px 30px;
+  }
+
+  /* empty state */
+  #empty-state {
+    margin: auto; max-width: 560px; text-align: center;
+    animation: rise .4s ease both;
+  }
+  #empty-state .orb-small {
+    width: 54px; height: 54px; margin: 0 auto 18px; border-radius: 16px;
+    background: linear-gradient(135deg, rgba(34,211,238,.25), rgba(139,92,246,.25));
+    border: 1px solid var(--border-bright);
+    position: relative;
+  }
+  #empty-state .orb-small::after {
+    content: ""; position: absolute; inset: 14px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 0 22px rgba(34, 211, 238, 0.5);
+    transform: rotate(45deg) scale(0.72);
+  }
+  #empty-state h1 { font-size: 22px; font-weight: 700; margin: 0 0 8px; letter-spacing: 0.3px; }
+  #empty-state p { color: var(--muted); font-size: 13.5px; line-height: 1.6; margin: 0 0 22px; }
+  .chips { display: flex; flex-direction: column; gap: 9px; }
+  .chip-task {
+    text-align: left; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 11px;
+    background: var(--panel);
+    padding: 11px 14px; font-size: 12.5px; color: var(--muted); line-height: 1.5;
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  .chip-task:hover { border-color: rgba(34,211,238,.45); color: var(--text); background: rgba(34,211,238,.05); }
+  .chip-task b { color: var(--accent); font-weight: 650; }
+
+  /* working indicator */
+  #working { display: none; margin: auto; text-align: center; }
+  #working.on { display: block; animation: rise .3s ease both; }
+  .core { position: relative; width: 74px; height: 74px; margin: 0 auto 20px; }
+  .core .ring {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 1px solid rgba(34, 211, 238, 0.35);
+    animation: ringpulse 2.2s ease-out infinite;
+  }
+  .core .ring:nth-child(2) { animation-delay: 1.1s; }
+  .core .nucleus {
+    position: absolute; inset: 22px; border-radius: 50%;
+    background: conic-gradient(from 0deg, var(--accent), var(--accent2), var(--accent));
+    filter: blur(0.5px);
+    animation: spin 2.6s linear infinite;
+    box-shadow: 0 0 26px rgba(34, 211, 238, 0.55);
+  }
+  @keyframes ringpulse { 0% { transform: scale(.55); opacity: 0; } 35% { opacity: 1; } 100% { transform: scale(1.35); opacity: 0; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #working .label { color: var(--muted); font-size: 13px; letter-spacing: 0.4px; }
+  #working .label::after { content: ""; animation: dots 1.4s steps(4, end) infinite; }
+  @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+
+  /* chat thread */
+  #chat {
+    display: none; flex-direction: column; gap: 14px;
+    max-width: 860px; width: 100%; margin: 0 auto; padding-bottom: 8px;
+  }
+  #chat.on { display: flex; }
+  .msg { max-width: 84%; animation: rise .25s ease both; }
+  .msg.user {
+    align-self: flex-end;
+    background: linear-gradient(135deg, rgba(34, 211, 238, 0.14), rgba(139, 92, 246, 0.14));
+    border: 1px solid rgba(34, 211, 238, 0.28);
+    border-radius: 14px 14px 4px 14px;
+    padding: 10px 15px; font-size: 13.5px; line-height: 1.55;
+  }
+  .msg.user .msg-text { white-space: pre-wrap; word-break: break-word; }
+  .msg.agent {
+    align-self: flex-start;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px 14px 14px 4px;
+    padding: 13px 17px; font-size: 14px; line-height: 1.7;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35);
+  }
+  .msg.agent.error { border-color: rgba(248, 113, 113, 0.45); }
+  .msg-label {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 10px; font-weight: 700; letter-spacing: 1.3px; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 7px;
+  }
+  .msg.agent .msg-label::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+  }
+  .msg.user .msg-label { color: var(--accent); }
+  .pending { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
+  .core.mini { width: 30px; height: 30px; margin: 0; flex: none; }
+  .core.mini .nucleus { inset: 9px; box-shadow: 0 0 14px rgba(34, 211, 238, 0.55); }
+  .pending .label::after { content: ""; animation: dots 1.4s steps(4, end) infinite; }
+  .msg-body h1, .msg-body h2, .msg-body h3 { margin: 0.9em 0 0.45em; line-height: 1.3; }
+  .msg-body h1 { font-size: 19px; } .msg-body h2 { font-size: 16.5px; } .msg-body h3 { font-size: 14.5px; }
+  .msg-body h1:first-child, .msg-body h2:first-child { margin-top: 0; }
+  .msg-body p { margin: 0.55em 0; }
+  .msg-body ul { margin: 0.4em 0; padding-left: 20px; }
+  .msg-body li { margin: 3px 0; }
+  .msg-body code {
+    font-family: var(--mono); font-size: 12.5px;
+    background: rgba(34, 211, 238, 0.09); border: 1px solid rgba(34, 211, 238, 0.18);
+    padding: 1px 6px; border-radius: 5px;
+  }
+  .msg-body pre {
+    background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border);
+    border-radius: 9px; padding: 12px 14px; overflow-x: auto;
+  }
+  .msg-body pre code { background: none; border: none; padding: 0; }
+  .msg-body strong { color: #fff; }
+
+  /* ---------- mission log (trace) ---------- */
+  #trace { display: flex; flex-direction: column; gap: 9px; padding: 2px 4px 8px; }
+  .trace-empty { color: var(--faint); font-size: 12.5px; padding: 10px 8px; line-height: 1.6; }
+  .step {
+    border-radius: 11px;
+    padding: 10px 12px;
+    animation: stepin .3s ease both;
+  }
+  @keyframes stepin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .step-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .step-n { font-size: 10.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--faint); }
+  .tool-chip {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    padding: 2px 8px; border-radius: 6px;
+    border: 1px solid;
+  }
+  .tool-list_directory { color: var(--tool-list); border-color: color-mix(in srgb, var(--tool-list) 45%, transparent); background: color-mix(in srgb, var(--tool-list) 10%, transparent); }
+  .tool-read_file      { color: var(--tool-read); border-color: color-mix(in srgb, var(--tool-read) 45%, transparent); background: color-mix(in srgb, var(--tool-read) 10%, transparent); }
+  .tool-search_content { color: var(--tool-search); border-color: color-mix(in srgb, var(--tool-search) 45%, transparent); background: color-mix(in srgb, var(--tool-search) 10%, transparent); }
+  .tool-write_file     { color: var(--tool-write); border-color: color-mix(in srgb, var(--tool-write) 45%, transparent); background: color-mix(in srgb, var(--tool-write) 10%, transparent); }
+  .tool-move_file      { color: var(--tool-move); border-color: color-mix(in srgb, var(--tool-move) 45%, transparent); background: color-mix(in srgb, var(--tool-move) 10%, transparent); }
+  .step .args {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    white-space: pre-wrap; word-break: break-word;
+    background: rgba(0,0,0,0.28); border: 1px solid var(--border);
+    border-radius: 7px; padding: 7px 9px; margin: 0 0 7px;
+    max-height: 130px; overflow-y: auto;
+  }
+  .step .result {
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
+    color: var(--text); white-space: pre-wrap; word-break: break-word;
+  }
+  .step.error { border-color: rgba(248, 113, 113, 0.35); background: rgba(248, 113, 113, 0.05); }
+  .step.error .result { color: var(--err); }
+  .trace-line {
+    text-align: center; font-size: 11px; letter-spacing: 0.5px;
+    color: var(--faint); padding: 3px 0;
+  }
+  .trace-line.ok { color: var(--ok); }
+  .trace-line.err { color: var(--err); }
+
+  /* ---------- composer ---------- */
+  #composer {
+    grid-area: composer;
+    padding: 12px 14px;
+  }
+  .composer-box { position: relative; }
+  #task {
+    width: 100%; resize: none;
+    padding: 10px 76px 10px 13px;
+    font-size: 13.5px; line-height: 1.5;
+    min-height: 44px; max-height: 140px;
+  }
+  #run-btn {
+    position: absolute; right: 7px; bottom: 7px;
+    padding: 7px 15px; font-size: 12px; border-radius: 8px;
+  }
+  /* explorer header actions (Reset button) */
+  .panel-head-actions { display: flex; align-items: center; gap: 6px; }
+  .panel-head-actions .btn { padding: 4px 10px; font-size: 11px; border-radius: 7px; }
+  /* inline file-op dialog (new folder / delete confirm) — no native prompt/confirm */
+  .fs-dialog {
+    display: none; flex-direction: column; gap: 8px;
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    background: rgba(34, 211, 238, 0.04);
+    animation: rise .18s ease both;
+  }
+  .fs-dialog.on { display: flex; }
+  .fs-dialog-text { font-size: 12px; color: var(--muted); line-height: 1.5; word-break: break-word; }
+  .fs-dialog input[type="text"] {
+    width: 100%; padding: 7px 10px; font-size: 12.5px;
+    background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-bright);
+    border-radius: 8px; color: var(--text); outline: none;
+  }
+  .fs-dialog input[type="text"]:focus { border-color: var(--accent); }
+  .fs-dialog-actions { display: flex; gap: 7px; }
+  .fs-dialog-actions .btn { padding: 5px 13px; font-size: 11.5px; border-radius: 7px; }
+  .fs-dialog-actions .btn.danger {
+    background: rgba(248, 113, 113, 0.14); border-color: rgba(248, 113, 113, 0.4); color: var(--err);
+  }
+
+  /* ---------- file viewer modal ---------- */
+  #viewer-overlay {
+    display: none; position: fixed; inset: 0; z-index: 40;
+    background: rgba(2, 4, 8, 0.66);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    align-items: center; justify-content: center;
+  }
+  #viewer-overlay.on { display: flex; }
+  #viewer {
+    width: min(820px, 92vw); max-height: 84vh;
+    display: flex; flex-direction: column;
+    background: var(--panel-strong);
+    border: 1px solid var(--border-bright);
+    border-radius: 16px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+    animation: rise .22s ease both;
+  }
+  #viewer-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+  }
+  #viewer-title { font-family: var(--mono); font-size: 12.5px; color: var(--text); word-break: break-all; }
+  #viewer-meta { font-size: 11px; color: var(--faint); font-family: var(--mono); white-space: nowrap; }
+  #viewer-head .spacer { flex: 1; }
+  #viewer-trunc {
+    display: none; padding: 7px 16px;
+    font-size: 11.5px; color: var(--warn);
+    background: rgba(251, 191, 36, 0.07);
+    border-bottom: 1px solid rgba(251, 191, 36, 0.2);
+  }
+  #viewer-body {
+    overflow: auto; padding: 16px 18px;
+    font-family: var(--mono); font-size: 12px; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word;
+    color: #c9d2e0;
+  }
+
+  /* ---------- toasts ---------- */
+  #toasts {
+    position: fixed; top: 64px; right: 16px; z-index: 60;
+    display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+  }
+  .toast {
+    pointer-events: auto;
+    padding: 10px 15px; border-radius: 10px;
+    font-size: 12.5px; max-width: 340px;
+    background: var(--panel-strong);
+    border: 1px solid var(--border-bright);
+    box-shadow: 0 10px 34px rgba(0,0,0,.45);
+    animation: stepin .25s ease both;
+  }
+  .toast.err { border-color: rgba(248, 113, 113, 0.5); color: var(--err); }
+  .toast.ok { border-color: rgba(52, 211, 153, 0.5); color: var(--ok); }
+
+  @media (max-width: 1200px) {
+    #app { grid-template-columns: var(--left-w, 232px) minmax(0, 1fr) var(--right-w, 300px); }
+    .stats .stat:nth-child(4) { display: none; }  /* hide Steps at tight widths */
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <span class="brand-name">AI File Agent <span>/ workspace ops</span></span>
+    </div>
+    <div class="header-right">
+      <div class="stats">
+        <span class="pill" id="stat-status">idle</span>
+        <span class="stat">LLM<b id="stat-calls">0</b></span>
+        <span class="stat">Tokens<b id="stat-tokens">0</b></span>
+        <span class="stat">Steps<b id="stat-steps">0</b></span>
+      </div>
+    </div>
+  </header>
+
+  <aside id="explorer" class="glass">
+    <div class="panel-head">
+      <span>Workspace</span>
+      <span class="panel-head-actions">
+        <button class="btn" id="reset-btn">Reset</button>
+        <button class="icon-btn" id="tree-newfolder" title="New folder (in workspace root)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+        </button>
+        <button class="icon-btn" id="tree-upload" title="Upload files to workspace root">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </button>
+        <button class="icon-btn" id="tree-refresh" title="Refresh file tree">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
+        </button>
+      </span>
+    </div>
+    <div class="fs-dialog" id="fs-dialog">
+      <div class="fs-dialog-text" id="fs-dialog-text"></div>
+      <input type="text" id="fs-dialog-input" placeholder="e.g. reports or reports/2025" autocomplete="off" />
+      <div class="fs-dialog-actions">
+        <button class="btn primary" id="fs-dialog-ok">OK</button>
+        <button class="btn" id="fs-dialog-cancel">Cancel</button>
+      </div>
+    </div>
+    <div class="panel-body"><div id="tree"><div class="tree-empty">Loading…</div></div></div>
+  </aside>
+
+  <main id="stage">
+    <div id="empty-state">
+      <div class="orb-small"></div>
+      <h1>What should the agent do?</h1>
+      <div class="chips">
+        <button class="chip-task" data-task='Find every file in the workspace that mentions "Project Falcon" and create falcon_index.md in the workspace root: start with the project&#39;s CURRENT official name, then group entries by month (## YYYY-MM headings, using the date each file states about itself), one line per file: - &lt;relative path&gt; — &lt;one-sentence summary&gt;.'><b>Cross-file index</b> — Find every file mentioning "Project Falcon" and build a month-grouped falcon_index.md</button>
+        <button class="chip-task" data-task="Move every draft in drafts/ whose CONTENT is marked status: obsolete into archive/ (create it if missing), then write archive/MANIFEST.md listing each moved file as '- &lt;filename&gt;'. Do not touch any other file. Judge by content, not filename."><b>Controlled cleanup</b> — Archive drafts whose content says status: obsolete, write a manifest</button>
+        <button class="chip-task" data-task="Search the big log in logs/ for anything unusual and summarize what you find. Do not read the whole file."><b>Big-file dig</b> — Search the huge server log for anomalies without reading it whole</button>
+      </div>
+    </div>
+
+    <div id="chat"></div>
+  </main>
+
+  <aside id="mission" class="glass">
+    <div class="panel-head"><span>Mission log</span></div>
+    <div class="panel-body">
+      <div id="trace"><div class="trace-empty">No steps yet. When a run starts, every tool call the agent makes appears here in real time.</div></div>
+    </div>
+  </aside>
+
+  <footer id="composer">
+    <div class="composer-box">
+      <textarea id="task" rows="2" placeholder='Describe the task… e.g. Find every file mentioning "Project Falcon" and build falcon_index.md grouped by month.'></textarea>
+      <button class="btn primary" id="run-btn">Send</button>
+    </div>
+  </footer>
+
+  <div class="drag-handle" id="drag-left"></div>
+  <div class="drag-handle" id="drag-right"></div>
+</div>
+
+<input type="file" id="upload-input" multiple style="display:none" />
+
+<div id="viewer-overlay">
+  <div id="viewer">
+    <div id="viewer-head">
+      <span id="viewer-title"></span>
+      <span class="spacer"></span>
+      <span id="viewer-meta"></span>
+      <button class="icon-btn" id="viewer-close" title="Close">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="viewer-trunc">Large file — showing the first 100 KB only.</div>
+    <div id="viewer-body"></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+// Surface any script failure visibly instead of leaving dead buttons.
+window.addEventListener("error", (e) => {
+  const t = document.createElement("div");
+  t.className = "toast err";
+  t.textContent = "UI script error: " + e.message;
+  const host = document.getElementById("toasts");
+  if (host) host.appendChild(t);
+});
+let polling = null;
+let renderedSteps = 0;
+let traceStarted = false;
+
+// ---------- helpers ----------
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function toast(msg, kind) {
+  const t = document.createElement("div");
+  t.className = "toast " + (kind || "");
+  t.textContent = msg;
+  $("toasts").appendChild(t);
+  setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity .3s"; setTimeout(() => t.remove(), 320); }, 5000);
+}
+function setStatus(state) {
+  const el = $("stat-status");
+  el.textContent = state;
+  el.className = "pill " + (state === "idle" ? "" : state);
+}
+
+// ---------- sidebar drag-resize ----------
+// localStorage can THROW (private mode, blocked storage, strict privacy
+// settings) — a SecurityError here must never kill the whole script.
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+(function initSidebarResize() {
+  const app = $("app");
+  // restore persisted widths
+  for (const v of ["--left-w", "--right-w"]) {
+    const saved = store.get("sidebar:" + v);
+    if (saved) app.style.setProperty(v, saved);
+  }
+  function makeResizable(handleId, varName, invert) {
+    const handle = $(handleId);
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      handle.classList.add("active");
+      const startX = e.clientX;
+      const current = getComputedStyle(app).getPropertyValue(varName).trim();
+      const startW = parseInt(current, 10) || (invert ? 336 : 258);
+      function onMove(ev) {
+        let w = invert ? startW + (startX - ev.clientX) : startW + (ev.clientX - startX);
+        w = Math.max(180, Math.min(560, w));
+        app.style.setProperty(varName, w + "px");
+      }
+      function onUp() {
+        handle.classList.remove("active");
+        store.set("sidebar:" + varName, app.style.getPropertyValue(varName));
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      }
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  }
+  makeResizable("drag-left", "--left-w", false);
+  makeResizable("drag-right", "--right-w", true);
+})();
+
+// ---------- file tree (collapsible) ----------
+const CHEVRON = '<svg class="tree-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>';
+const FOLDER = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+const FILEICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+async function refreshTree() {
+  try {
+    const res = await fetch("/api/files");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const tree = await res.json();
+    const host = $("tree");
+    host.innerHTML = "";
+    const ul = document.createElement("ul");
+    for (const child of (tree.children || [])) ul.appendChild(renderNode(child, 0));
+    host.appendChild(ul);
+    if (!ul.children.length) host.innerHTML = '<div class="tree-empty">Workspace is empty.</div>';
+  } catch (e) {
+    $("tree").innerHTML = '<div class="tree-empty">Failed to load tree: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+const TRASH = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+const UPLOAD = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+
+// ---------- workspace file management ----------
+async function fsCall(url, options, okMsg) {
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      let detail = "HTTP " + res.status;
+      try { detail = (await res.json()).detail || detail; } catch {}
+      throw new Error(detail);
+    }
+    if (okMsg) toast(okMsg, "ok");
+    refreshTree();
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+// Inline file-op dialog — native prompt()/confirm() are silently blocked in
+// some browsers/contexts, so all file-op interactions happen in-page.
+let fsDialogAction = null;
+function openFsDialog({ text, showInput, okLabel, danger, onOk }) {
+  $("fs-dialog-text").textContent = text;
+  const input = $("fs-dialog-input");
+  input.style.display = showInput ? "block" : "none";
+  input.value = "";
+  const ok = $("fs-dialog-ok");
+  ok.textContent = okLabel || "OK";
+  ok.className = "btn" + (danger ? " danger" : " primary");
+  fsDialogAction = onOk;
+  $("fs-dialog").classList.add("on");
+  if (showInput) setTimeout(() => input.focus(), 30);
+}
+function closeFsDialog() {
+  $("fs-dialog").classList.remove("on");
+  fsDialogAction = null;
+}
+$("fs-dialog-ok").addEventListener("click", () => {
+  const fn = fsDialogAction;
+  closeFsDialog();
+  if (fn) fn();
+});
+$("fs-dialog-cancel").addEventListener("click", closeFsDialog);
+$("fs-dialog-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("fs-dialog-ok").click();
+  if (e.key === "Escape") closeFsDialog();
+});
+
+function newFolder() {
+  openFsDialog({
+    text: "New folder path, relative to the workspace root:",
+    showInput: true,
+    okLabel: "Create",
+    onOk: () => {
+      const name = $("fs-dialog-input").value.trim();
+      if (!name) return;
+      fsCall("/api/fs/mkdir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: name }),
+      }, "Folder created.");
+    },
+  });
+}
+function deletePath(path, isDir) {
+  openFsDialog({
+    text: 'Delete ' + (isDir ? 'folder' : 'file') + ' "' + path + '"' + (isDir ? " and everything inside it" : "") + "?",
+    showInput: false,
+    okLabel: "Delete",
+    danger: true,
+    onOk: () => fsCall("/api/fs/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    }, "Deleted " + path),
+  });
+}
+function uploadInto(dir) {
+  const input = $("upload-input");
+  input.dataset.dir = dir || ".";
+  input.value = "";
+  input.click();
+}
+$("upload-input").addEventListener("change", (e) => {
+  if (!e.target.files.length) return;
+  const fd = new FormData();
+  for (const f of e.target.files) fd.append("files", f);
+  const dir = e.target.dataset.dir || ".";
+  fsCall("/api/fs/upload?dir=" + encodeURIComponent(dir), { method: "POST", body: fd },
+    "Uploaded " + e.target.files.length + " file(s).");
+});
+$("tree-newfolder").addEventListener("click", newFolder);
+$("tree-upload").addEventListener("click", () => uploadInto("."));
+
+function rowActions(actions) {
+  const span = document.createElement("span");
+  span.className = "row-actions";
+  for (const a of actions) {
+    const b = document.createElement("button");
+    b.className = "icon-btn" + (a.danger ? " danger" : "");
+    b.title = a.title;
+    b.innerHTML = a.icon;
+    b.addEventListener("click", (e) => { e.stopPropagation(); a.fn(); });
+    span.appendChild(b);
+  }
+  return span;
+}
+
+function renderNode(node, depth) {
+  const li = document.createElement("li");
+  if (node.type === "dir") {
+    li.className = "tree-item" + (depth === 0 ? " open" : "");
+    const row = document.createElement("div");
+    row.className = "tree-row";
+    row.innerHTML = CHEVRON + FOLDER + '<span class="fname">' + escapeHtml(node.name) + "</span>";
+    row.appendChild(rowActions([
+      { title: "Upload files into this folder", icon: UPLOAD, fn: () => uploadInto(node.path) },
+      { title: "Delete this folder", icon: TRASH, danger: true, fn: () => deletePath(node.path, true) },
+    ]));
+    row.addEventListener("click", () => li.classList.toggle("open"));
+    li.appendChild(row);
+    const ul = document.createElement("ul");
+    ul.className = "tree-children";
+    for (const child of (node.children || [])) ul.appendChild(renderNode(child, depth + 1));
+    li.appendChild(ul);
+  } else {
+    li.className = "tree-item";
+    const row = document.createElement("div");
+    row.className = "tree-row";
+    row.title = node.path;
+    row.innerHTML = '<span style="width:10px"></span>' + FILEICON +
+      '<span class="fname">' + escapeHtml(node.name) + "</span>" +
+      (node.size > 100000 ? '<span class="fsize">' + (node.size / 1024).toFixed(0) + " KB</span>" : "");
+    row.appendChild(rowActions([
+      { title: "Delete this file", icon: TRASH, danger: true, fn: () => deletePath(node.path, false) },
+    ]));
+    row.addEventListener("click", () => openFile(node.path));
+    li.appendChild(row);
+  }
+  return li;
+}
+$("tree-refresh").addEventListener("click", refreshTree);
+
+// ---------- file viewer ----------
+async function openFile(path) {
+  try {
+    const res = await fetch("/api/file?path=" + encodeURIComponent(path));
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    $("viewer-title").textContent = data.path;
+    $("viewer-meta").textContent = data.size + " bytes";
+    $("viewer-body").textContent = data.content || "(empty file)";
+    $("viewer-trunc").style.display = data.truncated ? "block" : "none";
+    $("viewer-overlay").classList.add("on");
+  } catch (e) {
+    toast("Could not open file: " + e.message, "err");
+  }
+}
+function closeViewer() { $("viewer-overlay").classList.remove("on"); }
+$("viewer-close").addEventListener("click", closeViewer);
+$("viewer-overlay").addEventListener("click", (e) => { if (e.target === $("viewer-overlay")) closeViewer(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeViewer(); });
+
+// ---------- trace ----------
+function traceLine(text, cls) {
+  ensureTraceStarted();
+  const div = document.createElement("div");
+  div.className = "trace-line " + (cls || "");
+  div.textContent = text;
+  $("trace").appendChild(div);
+  scrollTrace();
+}
+function ensureTraceStarted() {
+  if (!traceStarted) { $("trace").innerHTML = ""; traceStarted = true; }
+}
+function scrollTrace() {
+  const body = $("trace").parentElement;
+  body.scrollTop = body.scrollHeight;
+}
+function renderStep(step) {
+  ensureTraceStarted();
+  const card = document.createElement("div");
+  const isErr = /^error/i.test(step.result_summary || "");
+  card.className = "step glass" + (isErr ? " error" : "");
+  const toolClass = "tool-" + String(step.tool).replace(/[^a-z_]/g, "");
+  card.innerHTML =
+    '<div class="step-head"><span class="step-n">Step ' + step.step + '</span>' +
+    '<span class="tool-chip ' + toolClass + '">' + escapeHtml(step.tool) + "</span></div>" +
+    '<pre class="args">' + escapeHtml(JSON.stringify(step.args, null, 2)) + "</pre>" +
+    '<div class="result">' + escapeHtml(step.result_summary) + "</div>";
+  $("trace").appendChild(card);
+  scrollTrace();
+}
+
+// ---------- stage / chat ----------
+function syncStage() {
+  const hasChat = $("chat").children.length > 0;
+  $("empty-state").style.display = hasChat ? "none" : "block";
+  $("chat").classList.toggle("on", hasChat);
+}
+function scrollStage() { $("stage").scrollTop = $("stage").scrollHeight; }
+
+function addUserMsg(text) {
+  const d = document.createElement("div");
+  d.className = "msg user";
+  const label = document.createElement("div");
+  label.className = "msg-label";
+  label.textContent = "You";
+  const body = document.createElement("div");
+  body.className = "msg-text";
+  body.textContent = text;
+  d.append(label, body);
+  $("chat").appendChild(d);
+  scrollStage();
+}
+
+function addAgentPending() {
+  const d = document.createElement("div");
+  d.className = "msg agent";
+  d.id = "pending-msg";
+  d.innerHTML =
+    '<div class="msg-label">Agent</div>' +
+    '<div class="pending"><div class="core mini"><div class="ring"></div><div class="ring"></div><div class="nucleus"></div></div>' +
+    '<span class="label">Agent is working</span></div>';
+  $("chat").appendChild(d);
+  scrollStage();
+}
+
+function finishAgentMsg(html, isError) {
+  const d = $("pending-msg");
+  if (!d) return;
+  d.removeAttribute("id");
+  d.classList.toggle("error", !!isError);
+  const label = d.querySelector(".msg-label");
+  d.innerHTML = "";
+  d.appendChild(label);
+  const body = document.createElement("div");
+  body.className = "msg-body";
+  body.innerHTML = html;
+  d.appendChild(body);
+  scrollStage();
+}
+
+function setInputsEnabled(enabled) {
+  $("run-btn").disabled = !enabled;
+  $("task").disabled = !enabled;
+  if (enabled) $("task").focus();
+}
+
+// Tiny Markdown-ish renderer: headings, bold, inline code, code fences, lists.
+function renderMarkdown(src) {
+  const lines = String(src).split("\n");
+  let html = "", inCode = false, inList = false;
+  const inline = (s) => escapeHtml(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const closeList = () => { if (inList) { html += "</ul>"; inList = false; } };
+  for (const line of lines) {
+    if (/^```/.test(line.trim())) {
+      closeList();
+      html += inCode ? "</code></pre>" : "<pre><code>";
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) { html += escapeHtml(line) + "\n"; continue; }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { closeList(); const n = Math.min(h[1].length, 3); html += `<h${n}>${inline(h[2])}</h${n}>`; continue; }
+    const li = line.match(/^\s*[-*]\s+(.*)$/);
+    if (li) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${inline(li[1])}</li>`; continue; }
+    closeList();
+    if (line.trim()) html += `<p>${inline(line)}</p>`;
+  }
+  if (inCode) html += "</code></pre>";
+  closeList();
+  return html;
+}
+
+// ---------- agent run ----------
+async function runTask() {
+  const task = $("task").value.trim();
+  if (!task || polling) return;
+  setInputsEnabled(false);
+  $("task").value = "";
+  renderedSteps = 0;
+  traceStarted = false;
+  $("trace").innerHTML = "";
+  setStatus("running");
+  addUserMsg(task);
+  addAgentPending();
+  syncStage();
+  $("stat-calls").textContent = "0";
+  $("stat-tokens").textContent = "0";
+  $("stat-steps").textContent = "0";
+
+  let res;
+  try {
+    res = await fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task }),
+    });
+  } catch (e) {
+    traceLine("Network error: " + e.message, "err");
+    toast("Network error: " + e.message, "err");
+    setStatus("error");
+    finishAgentMsg("<p>Network error: " + escapeHtml(e.message) + "</p>", true);
+    setInputsEnabled(true);
+    return;
+  }
+  if (!res.ok) {
+    traceLine("Request failed: HTTP " + res.status, "err");
+    toast("Request failed: HTTP " + res.status, "err");
+    setStatus("error");
+    finishAgentMsg("<p>Request failed: HTTP " + res.status + "</p>", true);
+    setInputsEnabled(true);
+    return;
+  }
+  const { session_id } = await res.json();
+  traceLine("Session " + session_id + " started");
+  polling = setInterval(() => pollTrace(session_id), 1000);
+}
+
+async function pollTrace(sessionId) {
+  let data;
+  try {
+    const res = await fetch("/api/trace/" + sessionId);
+    if (!res.ok) return;
+    data = await res.json();
+  } catch (e) { return; }
+
+  for (; renderedSteps < data.steps.length; renderedSteps++) {
+    renderStep(data.steps[renderedSteps]);
+  }
+  $("stat-steps").textContent = data.steps.length;
+  $("stat-calls").textContent = data.llm_calls;
+  $("stat-tokens").textContent = data.total_tokens;
+
+  if (data.status !== "running") {
+    clearInterval(polling);
+    polling = null;
+    $("stat-calls").textContent = data.llm_calls;
+    $("stat-tokens").textContent = data.total_tokens;
+    setStatus(data.status);
+    traceLine("Run finished: " + data.status, data.status === "done" ? "ok" : "err");
+    if (data.final_answer) {
+      finishAgentMsg(renderMarkdown(data.final_answer), data.status !== "done");
+      if (data.status === "error") toast("The run ended with an error — see the agent's reply.", "err");
+    } else {
+      finishAgentMsg("<p>The run ended without a final answer (status: " + escapeHtml(data.status) + ").</p>", true);
+    }
+    setInputsEnabled(true);
+    refreshTree();
+  }
+}
+
+$("run-btn").addEventListener("click", runTask);
+$("task").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runTask(); }
+});
+
+// example chips fill the composer
+document.querySelectorAll(".chip-task").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    $("task").value = chip.dataset.task;
+    $("task").focus();
+  });
+});
+
+// ---------- reset ----------
+$("reset-btn").addEventListener("click", () => {
+  openFsDialog({
+    text: "Reset the workspace to its original state? All agent changes will be lost.",
+    showInput: false,
+    okLabel: "Reset",
+    danger: true,
+    onOk: async () => {
+      try {
+        const res = await fetch("/api/reset", { method: "POST" });
+        if (res.ok) {
+          toast("Workspace reset to its original state.", "ok");
+          traceLine("Workspace reset to original state", "ok");
+          refreshTree();
+        } else {
+          toast("Reset failed: HTTP " + res.status, "err");
+        }
+      } catch (e) {
+        toast("Reset failed: " + e.message, "err");
+      }
+    },
+  });
+});
+
+syncStage();
+setStatus("idle");
+refreshTree();
+</script>
+</body>
+</html>
