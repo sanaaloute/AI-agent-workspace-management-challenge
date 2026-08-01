@@ -4,6 +4,16 @@ Assumes: Ubuntu/Debian-ish box, nginx already installed, the app running on
 `127.0.0.1:8000` (bare metal via `uvicorn ui.server:app`, or
 `docker compose up` with the default `PORT=8000` mapping).
 
+## 0. Scripted install (recommended)
+
+```bash
+bash script/deploy.sh    # fresh install: docker, .env, nginx config, app build
+bash script/upgrade.sh   # later updates: pull code, rebuild app, refresh nginx
+```
+
+The manual steps below are exactly what `deploy.sh` automates.
+
+
 ## 1. Run the app
 
 Bare metal (with a venv):
@@ -34,16 +44,17 @@ sudo ln -s /etc/nginx/sites-available/agent /etc/nginx/sites-enabled/agent
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-Edit `/etc/nginx/sites-available/agent` first: replace `agent.example.com`
-with your real domain. The rate-limit zone lives in the conf.d snippet
-because `limit_req_zone` is only legal in the `http{}` context — if you ever
-move the server block into a different include scheme, keep the two together.
+Edit `/etc/nginx/sites-available/agent` first: `server_name` is already set
+to `agent.barkosem.com` — just make sure its DNS A record points at this VPS.
+The rate-limit zone lives in the conf.d snippet because `limit_req_zone` is
+only legal in the `http{}` context — if you ever move the server block into
+a different include scheme, keep the two together.
 
 ## 3. TLS with certbot
 
 ```bash
 sudo apt install certbot python3-certbot-nginx   # once
-sudo certbot --nginx -d agent.example.com
+sudo certbot --nginx -d agent.barkosem.com
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
